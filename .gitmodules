@@ -1,0 +1,3 @@
+[submodule "MRutils"]
+	path = MRutils
+	url = git@github.com:richardslab/MRutils.git
