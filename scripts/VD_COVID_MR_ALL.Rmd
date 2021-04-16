@@ -19,15 +19,14 @@ params:
 ---
 
 ```{r setup}
-knitr::opts_chunk$set(echo = FALSE)
+#knitr::opts_chunk$set(echo = FALSE)
 knitr::opts_chunk$set(cache = params$use_cache)
-knitr::opts_chunk$set(warning = FALSE)
-knitr::opts_chunk$set(error = TRUE)
+knitr::opts_chunk$set(warning = TRUE)
+#knitr::opts_chunk$set(error = TRUE)
 knitr::opts_chunk$set(comment = "")
-
 ```
 
-```{r libraries and setup}
+```{r libraries and setup, echo=TRUE}
 library(tidyr)
 library(dplyr)
 library(plyr)
@@ -37,7 +36,7 @@ library(magrittr)
 library(ggplot2)
 library(validate)
 
-source("utils.R")
+source("../MRutils/scripts/utils.R")
 
 for (i in names(params)) { 
   if (i != "LDLink_token") 
@@ -59,17 +58,13 @@ data = read_excel(params$exposure_gwas_file,
                   skip = 4, 
                   .name_repair = "minimal") %>% 
   subset(select = c(1:5, 13:17))
-```
 
-```{r debug1,verbose=TRUE}
 first_blank = min(which(is.na(data$RSID)))
 # use the first blank line as an indication of the end of the data, since the dictionary comes after
 if (length(first_blank) == 1) {
   data = data[1:min(first_blank - 1, nrow(data)),]
 }
-```
 
-```{r debug2,verbose=TRUE}
 names(data)[8] = "beta"
 names(data)[1] = "rsid"
 data %<>% 
@@ -80,10 +75,14 @@ data %<>%
 
 Make sure that the exposure data validates as a gwas
 ```{r Validate exposure data}
-summary(confront(data, gwas_rules))
+validations=summary(confront(data, gwas_rules))
+
+if(any(validations$error)){
+  stop("found errors", validation)
+}
 ```
 
-```{r debug4,verbose=TRUE}
+```{r Filter significant SNPs, verbose=TRUE}
 significant_snps <- filter_and_write_exposure_data(data, 
                                                    location_prefix = glue("{params$results_dir}/{params$prefix}_"), 
                                                    params$exposure_pvalue_threshold, 
@@ -123,7 +122,7 @@ rsIdsFromDBSNP = glue("{params$results_dir}/{params$prefix}_rsIdsFromdbSnp.txt")
 
 ```
 ## find names for un-named snps
-```{r find_unnamed_snps, cache=params$use_cache, full.names = TRUE))}
+```{r find_unnamed_snps, cache=params$use_cache}
 ## this can take time and hits the API multiple times....
 print(glue("There are {nrow(outcome_data %>% subset(is.na(rsid)))} SNPs in the outcome data that are missing their rsid: "))
 print(outcome_data %>% subset(is.na(rsid), select = c(CHR, POS, EA, NEA)))
@@ -173,7 +172,7 @@ Subset to proxies that are in the outcome first, since we need to find out which
 ```{r use proxies}
 proxies_in_outcome <- extract_snps_from_bgzip(params$outcome_file, snps = proxies_raw) %>% map_outcome_data()
 
-print(glue("need to look for rsid for {nrow(subset(proxies_in_outcome, is.na(rsid)))} "))
+print(glue("need to look for rsid for {nrow(subset(proxies_in_outcome, is.na(rsid)))} SNPs"))
 
 rsIdsFromDBSNP_proxies = glue("{params$results_dir}/{params$prefix}_proxy_rsIdsFromdbSnp.txt")
 ```
@@ -187,7 +186,7 @@ write.table(x = proxies_in_outcome_with_missing_ids, file = rsIdsFromDBSNP_proxi
 ```
 
 ```{r merge with rest of outcome}
-proxies_in_outcome_with_missing_ids <- read.table(file = rsIdsFromDBSNP_proxies,  sep = '\t')
+proxies_in_outcome_with_missing_ids <- read.table(file = rsIdsFromDBSNP_proxies,  sep = '\t', header = TRUE)
 
 proxies_in_outcome_with_rsids <- merge_rsids_into_gwas(proxies_in_outcome, proxies_in_outcome_with_missing_ids)
 
@@ -209,7 +208,7 @@ exposure_and_proxies <- merge(proxies, significant_snps, by.x = c("query_rsid","
 Remove chimeric snps and then the smallest P
 ```{r, remove chimeric SNPs}
 proxies_with_exposure <- exposure_and_proxies %>% 
-  mutate(maf_near_half = abs(EAF.exp - 0.5) <= params$near_half_threshold, 
+  mutate(maf_near_half = abs(EAF - 0.5) <= params$near_half_threshold, 
          distance_to_query = abs(POS.exp - POS.proxy)) %>%
   subset( !(Alleles %in% chimeric & maf_near_half)) %>%
   group_by(query_rsid) %>%
@@ -245,13 +244,12 @@ if (!all(with(fixed_proxies_with_exposure, Alleles == glue("({EA}/{NEA})") | All
 ```
 
 ```{r merge proxy rows with outcome and combine with rest}
-
 merged_with_proxies <- merge(proxies_in_outcome_with_rsids,
                              fixed_proxies_with_exposure,
                              suffixes = c(".out",".exp"),
                              by.x = c("rsid", "CHR"),
                              by.y = c("rsid", "CHR")) %>%
-  select(c(-POS.proxy, -POS.exp, -R2, -Correlated_Alleles, -Alleles, -Locus,))
+  select(c(-POS.proxy, -POS.exp, -R2, -Correlated_Alleles, -Alleles, -Locus, -MAF))
 
 merged_and_combined <- rbind(merged_with_proxies, mutate(merged_exp_and_out, query_rsid = NA), stringsAsFactors = FALSE) %>% subset(!is.na(EAF.out))
 ```

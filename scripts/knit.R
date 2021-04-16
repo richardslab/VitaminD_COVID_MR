@@ -10,7 +10,8 @@ parser <- ArgumentParser()
 parser$add_argument("-t", "--token",
                     type = "character",
                     help = "LD-Link API access token. If you don't have one go here: https://ldlink.nci.nih.gov/?tab=apiaccess",
-                    metavar = "LD-Link API token")
+                    metavar = "LD-Link API token",
+                    default = "")
 parser$add_argument("-i", "--input-file",
                     type = "character",
                     help = "Rmd file to knit",
@@ -32,7 +33,7 @@ parser$add_argument("-f", "--output-file",
 args <- parser$parse_args()
 
 rmarkdown::render(
-  input = "VD_COVID_MR_ALL.Rmd",
+  input = args$input_file,
   output_format = "pdf_document",
   params = list(LDLink_token = args$token,
                 skip_LD_api = FALSE,
