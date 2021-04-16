@@ -48,7 +48,7 @@ for (i in names(params)) {
 ```
 
 
-## Extract data from VitaminD GWAS
+## Extract data from Exposure GWAS
 Since the input data is given to us as an excel spreadsheet, we have to extract the information from it
 "manually". In order to avoid copy-paste errors, we extract the information using the readxl library. 
 
@@ -71,14 +71,15 @@ data %<>%
   mutate_at(.vars = c("EAF", "beta", "SE", "P"), as.numeric) %>% 
   mutate(POS = BP, CHR = gsub("^chr", "", CHR), BP = NULL)
 ```
+Read `r nrow(data)` entries from `r params$exposure_gwas_file`
 
 
-Make sure that the exposure data validates as a gwas
+Making sure that the exposure data validates as a gwas
 ```{r Validate exposure data}
-validations=summary(confront(data, gwas_rules))
+validations <- summary(confront(data, gwas_rules))
 
-if(any(validations$error)){
-  stop("found errors", validation)
+if (any(validations$error)) {
+  stop("found errors", validations)
 }
 ```
 
@@ -88,7 +89,8 @@ significant_snps <- filter_and_write_exposure_data(data,
                                                    params$exposure_pvalue_threshold, 
                                                    params$MAF_rare_threshold)
 ```
-Read `r nrow(data)` entries from `r params$exposure_gwas_file`
+selecting significant snps and those that are not very rare (or common)
+found `r nrow(significant_snps)` signifiant and common SNPs.
 
 ### Outcome  
 
@@ -109,13 +111,17 @@ map_outcome_data <- function(x) {
  
   outcome_data <- extract_snps_from_bgzip(outcome = params$outcome_file, snps = significant_snps) %>% map_outcome_data()
   
-  print(glue("There are {nrow(outcome_data)} SNPs in the outcome file {params$outcome_file}"))
+  print(glue("{nrow(outcome_data)} exposure SNPs were found in the outcome file {params$outcome_file}"))
 ```
 
 
 Make sure that the outcome data validates as a gwas
 ```{r Validate outcome data}
-summary(confront(outcome_data, gwas_rules))
+validations <- summary(confront(outcome_data, gwas_rules))
+
+if (any(validations$error)){
+  stop("found errors", validations)
+}
 ```
 ```{r put output file name into variable}
 rsIdsFromDBSNP = glue("{params$results_dir}/{params$prefix}_rsIdsFromdbSnp.txt")
@@ -309,23 +315,49 @@ save(results, file = glue("{params$results_dir}/{params$prefix}_2SMR_results.RDa
 ```
 
 ```{r compare with Guillaumes results, eval=FALSE} 
-rsids=c("rs6698680", "rs3750296", "rs7519574", "rs56044892", "rs2934744", "rs7528419", "rs3768013", "rs115045402", "rs144613541", "rs61816761", "rs11264360", "rs867772", "rs12997242", "rs11127048", "rs6724965", "rs7569755", "rs1047891", "rs2011425", "rs1972994", "rs6438900", "rs6773343", "rs78649910", "rs7699711", "rs11723621", "rs58073039", "rs28364331", "rs1229984", "rs7718395", "rs3822868", "rs111529171", "rs1011468", "rs1858889", "rs804280", "rs34726834", "rs7828742", "rs10818769", "rs532436 (proxy: rs635634)", "rs10887718", "rs10832218", "rs577185477", "rs10832289", "rs188480917 (proxy: rs576128895) ", "rs117576073", "rs523583", "rs12803256", "rs200454003 (proxy: rs4245442)", "rs10793129", "rs1149605", "rs964184", "rs2847500", "rs12317268", "rs9668081", "rs10859995", "rs8018720", "rs261291", "rs1800588", "rs17765311", "rs62007299", "rs8063706", "rs77924615", "rs1800775", "rs2909218", "rs8091117", "rs2037511", "rs57631352", "rs73015021", "rs10500209", "rs58542926", "rs3814995", "rs1065853", "rs157595", "rs112285002 (proxy: rs296386)", "rs10426", "rs8103262", "rs6123359", "rs6127099", "rs2585442", "rs2762942", "rs2229742", "rs2074735", "rs960596")%>%gsub(pattern = " .*",replacement = "")
+guillaume=rbind(
+  data.frame(rsid=c("rs6698680", "rs3750296", "rs7519574", "rs56044892", "rs2934744", "rs7528419", "rs3768013", "rs115045402", "rs144613541", "rs61816761", "rs11264360", "rs867772"), CHR="1"),
+  data.frame(rsid=c("rs12997242", "rs11127048", "rs6724965", "rs7569755", "rs1047891", "rs2011425"), CHR="2"),
+  data.frame(rsid=c("rs1972994", "rs6438900", "rs6773343"), CHR="3"),
+  data.frame(rsid=c("rs78649910", "rs7699711", "rs11723621", "rs58073039", "rs28364331", "rs1229984"), CHR="4"),
+  data.frame(rsid="rs7718395", CHR="5"),
+  data.frame(rsid="rs3822868", CHR="6"),
+  data.frame(rsid=c("rs111529171", "rs1011468", "rs1858889"), CHR="7"),
+  data.frame(rsid=c("rs804280", "rs34726834", "rs7828742"), CHR="8"),
+  data.frame(rsid=c("rs10818769", "rs532436 (proxy: rs635634)"), CHR="9"),
+  data.frame(rsid=c("rs10887718"), CHR="10"),
+  data.frame(rsid=c("rs10832218", "rs577185477", "rs10832289", "rs188480917 (proxy: rs576128895) ", "rs117576073", "rs523583", "rs12803256", "rs200454003 (proxy: rs4245442)", "rs10793129", "rs1149605", "rs964184", "rs2847500", "rs12317268"), CHR="11"),
+  data.frame(rsid=c("rs9668081", "rs10859995"), CHR="12"),
+  data.frame(rsid=c("rs8018720"), CHR="14"),
+  data.frame(rsid=c("rs261291", "rs1800588","rs17765311", "rs62007299"), CHR="15"),
+  data.frame(rsid=c("rs8063706", "rs77924615", "rs1800775"), CHR="16"),
+  data.frame(rsid=c("rs2909218"), CHR="17"),
+  data.frame(rsid=c("rs8091117", "rs2037511"), CHR="18"),
+  data.frame(rsid=c("rs57631352", "rs73015021", "rs10500209", "rs58542926", "rs3814995", "rs1065853", "rs157595", "rs112285002 (proxy: rs296386)", "rs10426", "rs8103262"), CHR="19"),
+  data.frame(rsid=c("rs6123359", "rs6127099", "rs2585442", "rs2762942"), CHR="20"),
+  data.frame(rsid=c("rs2229742"), CHR="21"),
+  data.frame(rsid=c("rs2074735", "rs960596"), CHR="22"))%>%mutate(rsid=gsub(rsid, pattern = " .*",replacement = ""))
 
 ###investigate differences:
 
-setdiff(pruned_combined_snps$rsid,rsids)
-setdiff(rsids, pruned_combined_snps$rsid)
+subset(pruned_combined_snps, rsid %notin% guillaume$rsid)
+subset(guillaume, rsid %notin% pruned_combined_snps$rsid)
 
-rsids_differences=rbind(data.frame(rsid=setdiff(pruned_combined_snps$rsid,rsids), set="Y"),
-                        data.frame(rsid=setdiff(rsids,pruned_combined_snps$rsid), set="G"))
+
+setdiff(pruned_combined_snps$rsid, guillaume$rsids)
+setdiff(guillaume$rsid, pruned_combined_snps$rsid)
+
+rsids_differences=rbind(data.frame(subset(guillaume,rsid %in% setdiff(guillaume$rsid, pruned_combined_snps$rsid)),set="Y"),
+                        data.frame(subset(pruned_combined_snps, rsid %in% setdiff(pruned_combined_snps$rsid, guillaume$rsid), select=c("rsid","CHR")), set="G"))
 
 subset(proxies, rsid %in% rsids_differences$rsid)
 
 
-ld_pairs_raw <- get_LD_pairs(rsids_differences$rsid, population = params$pop, token = params$LDLink_token)
+ld_pairs_raw <- get_LD_pairs(rsids_differences, population = params$pop, token = params$LDLink_token)
+ld_pairs_raw%<>%subset(value>0.5 & variable!=RS_number)
 
+merge(merge(ld_pairs_raw,rsids_differences, by.x=c("RS_number","CHR"), by.y=c("rsid","CHR")), rsids_differences, by.x=c("variable","CHR"), by.y=c("rsid","CHR"))
 
-subset(pairs, RS_number %in% setdiff(pruned_combined_snps$rsid,rsids) || RS_number %in% setdiff(rsids,pruned_combined_snps$rsid))
 
 ```
 
