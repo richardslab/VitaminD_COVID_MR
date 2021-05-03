@@ -10,7 +10,7 @@ params:
   near_half_threshold: 0.08
   exposure_gwas_file: ../raw_data/1-s2.0-S0002929720300173-mmc2.xlsx
   exposure_pvalue_threshold: !r as.numeric("5e-5") 
-  MAF_rare_threshold: 0.01
+  EAF_rare_threshold: 0.01
   prune_r2_threshold: 0.05
   skip_LD_api: !r TRUE
   outcome_file: ../raw_data/COVID19_HGI_A2_ALL_leave_23andme_20201020.b37.txt.gz
@@ -42,7 +42,7 @@ for (i in names(params)) {
   if (i != "LDLink_token") 
     print(glue("{i} = {params[i]}")) 
   else 
-    print(glue("{i} = [redacted]"))
+    print(glue("{i} = [******]"))
 }
 
 ```
@@ -76,21 +76,25 @@ Read `r nrow(data)` entries from `r params$exposure_gwas_file`
 
 Making sure that the exposure data validates as a gwas
 ```{r Validate exposure data}
-validations <- summary(confront(data, gwas_rules))
-
-if (any(validations$error)) {
-  stop("found errors", validations)
-}
+validate_gwas(data)
 ```
 
 ```{r Filter significant SNPs, verbose=TRUE}
 significant_snps <- filter_and_write_exposure_data(data, 
                                                    location_prefix = glue("{params$results_dir}/{params$prefix}_"), 
                                                    params$exposure_pvalue_threshold, 
-                                                   params$MAF_rare_threshold)
+                                                   params$EAF_rare_threshold)
+
+
+
 ```
 selecting significant snps and those that are not very rare (or common)
 found `r nrow(significant_snps)` signifiant and common SNPs.
+
+##TODO: Add a quality control step that compares EAFs to dbSNP MAFs. and possibly filters deviating SNPs (by percent) 
+
+<!-- json_datum=jsonlite::read_json("https://rest.ensembl.org/variation/human/rs10832310?pops=1;content-type=application/json") -->
+<!-- json_datum$populations%>%Filter(f = function(x)grepl("1000GENOMES", x$population))%>%Filter(f = function(x)grepl("EUR", x$population)) -->
 
 ### Outcome  
 
@@ -111,18 +115,15 @@ map_outcome_data <- function(x) {
  
   outcome_data <- extract_snps_from_bgzip(outcome = params$outcome_file, snps = significant_snps) %>% map_outcome_data()
   
-  print(glue("{nrow(outcome_data)} exposure SNPs were found in the outcome file {params$outcome_file}"))
+    print(glue("{nrow(outcome_data)} exposure SNPs were found in the outcome file {params$outcome_file}"))
 ```
 
 
 Make sure that the outcome data validates as a gwas
 ```{r Validate outcome data}
-validations <- summary(confront(outcome_data, gwas_rules))
-
-if (any(validations$error)){
-  stop("found errors", validations)
-}
+assert_gwas(outcome_data)
 ```
+
 ```{r put output file name into variable}
 rsIdsFromDBSNP = glue("{params$results_dir}/{params$prefix}_rsIdsFromdbSnp.txt")
 
@@ -213,17 +214,15 @@ exposure_and_proxies <- merge(proxies, significant_snps, by.x = c("query_rsid","
 
 Remove chimeric snps and then the smallest P
 ```{r, remove chimeric SNPs}
-proxies_with_exposure <- exposure_and_proxies %>% 
-  mutate(maf_near_half = abs(EAF - 0.5) <= params$near_half_threshold, 
-         distance_to_query = abs(POS.exp - POS.proxy)) %>%
-  subset( !(Alleles %in% chimeric & maf_near_half)) %>%
-  group_by(query_rsid) %>%
-  slice_max(order_by = R2, n = 1, with_ties = TRUE) %>%
-  slice_min(order_by = distance_to_query, n = 1, with_ties = FALSE) %>%
-  ungroup() %>%
-  mutate(maf_near_half = NULL, 
-         distance_to_query = NULL) 
+proxies_with_exposure <- choose_best_proxies(exposure_and_proxies)
 ```
+
+```{r eval=FALSE}
+exposure_and_proxies%>%subset(as.character(query_rsid)==missing)
+
+
+```
+
 After removing ambiguous snps and choosing the most linked SNP for every query, `r nrow(proxies_with_exposure)` proxies remain.
 
 ```{r Check alleles, eval=FALSE}
@@ -343,22 +342,52 @@ guillaume=rbind(
 subset(pruned_combined_snps, rsid %notin% guillaume$rsid)
 subset(guillaume, rsid %notin% pruned_combined_snps$rsid)
 
-
-setdiff(pruned_combined_snps$rsid, guillaume$rsids)
-setdiff(guillaume$rsid, pruned_combined_snps$rsid)
-
 rsids_differences=rbind(data.frame(subset(guillaume,rsid %in% setdiff(guillaume$rsid, pruned_combined_snps$rsid)),set="Y"),
                         data.frame(subset(pruned_combined_snps, rsid %in% setdiff(pruned_combined_snps$rsid, guillaume$rsid), select=c("rsid","CHR")), set="G"))
 
 subset(proxies, rsid %in% rsids_differences$rsid)
 
 
-ld_pairs_raw <- get_LD_pairs(rsids_differences, population = params$pop, token = params$LDLink_token)
-ld_pairs_raw%<>%subset(value>0.5 & variable!=RS_number)
+ld_pairs_raw2 <- get_LD_pairs(rsids_differences, population = params$pop, token = params$LDLink_token)
+ld_pairs_raw2%<>%subset(value>0.5 & variable!=RS_number)
 
-merge(merge(ld_pairs_raw,rsids_differences, by.x=c("RS_number","CHR"), by.y=c("rsid","CHR")), rsids_differences, by.x=c("variable","CHR"), by.y=c("rsid","CHR"))
+merge(merge(ld_pairs_raw2,rsids_differences, by.x=c("RS_number","CHR"), by.y=c("rsid","CHR")), rsids_differences, by.x=c("variable","CHR"), by.y=c("rsid","CHR"))
 
 
 ```
 
 
+```{r eval=FALSE}
+# missing="rs2585442" ## Guillaume agrees that it should be removed since it has r^2 0.52 with rs6127099
+# missing="rs11723621" # instead of this SNP, we could keep rs705117 & rs560384646
+# missing="rs10832289" # I chose a different LD linked snp rs10832310 but it's chimeric....:-(
+# missing="rs12803256" # I chose a different LD linked snp rs12808183
+# missing="rs200454003" # This snp's position 11:71228990 isn't in the A2 outcome gwas...not sure what's going on 
+# missing="rs112285002" # This snp's position 19:48374320 isn't in the A2 outcome gwas but it is in the C2 outcome.
+# missing="rs2585442" # I chose a different LD linked snp rs6127099
+
+subset(significant_snps, rsid==missing)
+subset(outcome_data, rsid==missing)
+subset(outcome_with_rsids, rsid==missing)
+subset(proxies, rsid==missing)
+subset(proxies_in_outcome_with_missing_ids, rsid==missing)
+subset(proxies_in_outcome_with_rsids, rsid==missing)
+subset(proxies, rsid==missing)
+subset(merged_exp_and_out, rsid==missing)
+subset(proxies, rsid==missing)
+subset(exposure_and_proxies, rsid==missing)
+subset(proxies_with_exposure, rsid==missing)
+subset(fixed_proxies_with_exposure, rsid==missing)
+subset(merged_with_proxies, rsid==missing)
+subset(merged_and_combined, rsid==missing)
+subset(pruned_combined_snps, rsid==missing)
+missing %in% removed_rsids
+subset(ld_pairs_raw,RS_number==missing | value==missing )
+subset(ld_pairs_raw,(RS_number==missing | value==missing ) & value >0.05)
+subset(ld_pairs,(RS_number==missing | value==missing ) & value >0.05 & RS_number!=variable)
+subset(ld_pairs,(RS_number==missing | value==missing ) & value >0.05 & RS_number!=variable)$variable %in% pruned_combined_snps$rsid
+subset(pruned_combined_snps,rsid %in% subset(ld_pairs,(RS_number==missing | value==missing ) & value >0.05 & RS_number!=variable)$variable)
+subset(merged_and_combined,rsid %in% subset(ld_pairs,(RS_number==missing | value==missing ) & value >0.05 )$variable)
+
+
+```
